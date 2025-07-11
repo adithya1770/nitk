@@ -56,19 +56,46 @@ def decide_movement(grid_distances, zones):
 
     if status["front"]:
         print("stop")
-        #pixhawk CMDS
     elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
         print("stop")
-        # PIXHAWK COMMANDS GO HERE
-    elif (status["right"]):
+    elif status["right"]:
         print("move left")
-        #HERE AS WELL
-    elif (status["left"]):
+    elif status["left"]:
         print("move right")
-        #HERE AS WELL
+    else:
+        print("move forward")
 
-    if cv2.waitKey(1)==27:
-        break
+rows, cols = 4, 4
+frame_height, frame_width = 480, 640
+last_print_time = 0
+
+zones = {
+    "left": ['R1C1', 'R2C1', 'R3C1', 'R4C1'],
+    "right": ['R1C4', 'R2C4', 'R3C4', 'R4C4'],
+    "front": ['R1C2', 'R1C3', 'R2C2', 'R2C3', 'R3C2', 'R3C3', 'R4C2', 'R4C3']
+}
+
+try:
+    while True:
+        frame = get_video()
+        frame = cv2.resize(frame, (frame_width, frame_height))
+        depth = get_depth()
+        depth = cv2.resize(depth, (frame_width, frame_height))
+
+        grid_distances, labeled_frame = analyze_depth(depth, rows, cols, frame_height, frame_width)
+
+        current_time = time.time()
+        if current_time - last_print_time >= 1.0:
+            print(json.dumps(grid_distances, indent=2))
+            last_print_time = current_time
+
+        decide_movement(grid_distances, zones)
+
+        combined_frame = cv2.addWeighted(frame, 0.6, labeled_frame, 0.4, 0)
+        cv2.imshow("Kinect RGB Feed + Depth Grid", combined_frame)
+
+        if cv2.waitKey(1) == 27:
+            break
 
 except KeyboardInterrupt:
     pass
