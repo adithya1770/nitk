@@ -78,15 +78,19 @@ while True:
     if status["front"]:
         print("stop")
         #pixhawk CMDS
+        #add line follwing validation
     elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
         print("stop")
         # PIXHAWK COMMANDS GO HERE
+        #add line following validation
     elif (status["right"]):
-        print("move left")
-        #HERE AS WELL
-    elif (status["left"]):
         print("move right")
         #HERE AS WELL
+    elif (status["left"]):
+        print("move left")
+        #HERE AS WELL
+    else:
+        # keep moving front
 
     if cv2.waitKey(1)==27:
         break
