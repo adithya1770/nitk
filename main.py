@@ -4,19 +4,24 @@ import cv2
 import json
 import time
 
-rows, cols = 4, 4
-frame_height, frame_width = 480, 640
-cell_h = frame_height // rows
-cell_w = frame_width // cols
+# -----------------------------
+# CONFIGURATION
+# -----------------------------
+ROWS, COLS = 4, 4
+FRAME_HEIGHT, FRAME_WIDTH = 480, 640
+CELL_H = FRAME_HEIGHT // ROWS
+CELL_W = FRAME_WIDTH // COLS
+PRINT_INTERVAL = 1.0  # seconds
 
-zones = {
+ZONES = {
     "left": ['R1C1', 'R2C1', 'R3C1', 'R4C1'],
     "right": ['R1C4', 'R2C4', 'R3C4', 'R4C4'],
     "front": ['R1C2', 'R1C3', 'R2C2', 'R2C3', 'R3C2', 'R3C3', 'R4C2', 'R4C3']
 }
 
-last_print_time = 0
-
+# -----------------------------
+# SENSOR INPUT FUNCTIONS
+# -----------------------------
 def get_video():
     video, _ = freenect.sync_get_video()
     return cv2.cvtColor(video, cv2.COLOR_RGB2BGR)
@@ -25,66 +30,99 @@ def get_depth():
     depth, _ = freenect.sync_get_depth(format=freenect.DEPTH_MM)
     return depth
 
-def process_depth_grid(depth):
+# -----------------------------
+# GRID ANALYSIS FUNCTION
+# -----------------------------
+def analyze_grid(depth):
     grid_distances = {}
-    for i in range(rows):
-        for j in range(cols):
-            x1, y1 = j * cell_w, i * cell_h
-            x2, y2 = (j + 1) * cell_w, (i + 1) * cell_h
+    labels = {}
+
+    for i in range(ROWS):
+        for j in range(COLS):
+            x1, y1 = j * CELL_W, i * CELL_H
+            x2, y2 = (j + 1) * CELL_W, (i + 1) * CELL_H
+
             region = depth[y1:y2, x1:x2]
             valid = region[region != 2047]
+
             key = f"R{i+1}C{j+1}"
+
             if valid.size > 0:
                 avg_distance = int(np.mean(valid))
-                if avg_distance < 150:
-                    label = "<=0.15m"
-                else:
-                    label = f"{(avg_distance + 150) / 1000}m"
+                label = f"{(avg_distance + 150)/1000:.2f}m" if avg_distance >= 150 else "<=0.15m"
                 grid_distances[key] = avg_distance / 1000
             else:
                 label = "no data"
                 grid_distances[key] = None
-            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-            cv2.putText(frame, label, (x1 + 5, y1 + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-    return grid_distances
 
-def check_zones(grid_distances):
-    return {
+            labels[key] = (x1, y1, x2, y2, label)
+
+    return grid_distances, labels
+
+# -----------------------------
+# DISPLAY FRAME FUNCTION
+# -----------------------------
+def draw_grid(frame, labels):
+    for key, (x1, y1, x2, y2, label) in labels.items():
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+        cv2.putText(frame, label, (x1 + 5, y1 + 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
+    return frame
+
+# -----------------------------
+# DECISION LOGIC
+# -----------------------------
+def control_logic(grid_distances):
+    status = {
         zone: any(grid_distances[pos] is not None and grid_distances[pos] < 1.0 for pos in positions)
-        for zone, positions in zones.items()
+        for zone, positions in ZONES.items()
     }
 
-def handle_action(status):
     if status["front"]:
-        print("stop")
-    elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
-        print("stop")
-    elif status["right"]:
-        print("move left")
+        print("🔴 STOP")
+        # send_pixhawk_cmd("stop")
     elif status["left"]:
-        print("move right")
+        print("↪️ Move Right")
+        # send_pixhawk_cmd("right")
+    elif status["right"]:
+        print("↩️ Move Left")
+        # send_pixhawk_cmd("left")
     else:
-        print("clear")
+        print("✅ CLEAR")
+        # send_pixhawk_cmd("forward")
 
-while True:
-    frame = get_video()
-    frame = cv2.resize(frame, (frame_width, frame_height))
-    depth = get_depth()
-    depth = cv2.resize(depth, (frame_width, frame_height))
+# Placeholder for future Pixhawk integration
+def send_pixhawk_cmd(command):
+    print(f"[PIXHAWK] Execute: {command}")
+    # Implement MAVLink commands here using pymavlink
 
-    grid_distances = process_depth_grid(depth)
+# -----------------------------
+# MAIN LOOP
+# -----------------------------
+def main():
+    last_print_time = 0
 
-    current_time = time.time()
-    if current_time - last_print_time >= 1.0:
-        print(json.dumps(grid_distances, indent=2))
-        last_print_time = current_time
+    while True:
+        frame = cv2.resize(get_video(), (FRAME_WIDTH, FRAME_HEIGHT))
+        depth = cv2.resize(get_depth(), (FRAME_WIDTH, FRAME_HEIGHT))
 
-    status = check_zones(grid_distances)
-    handle_action(status)
+        grid_distances, labels = analyze_grid(depth)
+        frame = draw_grid(frame, labels)
+        cv2.imshow("Kinect Feed + Grid", frame)
 
-    cv2.imshow("Kinect RGB Feed + Depth Grid", frame)
+        current_time = time.time()
+        if current_time - last_print_time >= PRINT_INTERVAL:
+            print(json.dumps(grid_distances, indent=2))
+            control_logic(grid_distances)
+            last_print_time = current_time
 
-    if cv2.waitKey(1) == 27:
-        break
+        if cv2.waitKey(1) == 27:  # ESC key
+            break
 
-cv2.destroyAllWindows()
+    cv2.destroyAllWindows()
+
+# -----------------------------
+# RUN
+# -----------------------------
+if __name__ == "__main__":
+    main()
