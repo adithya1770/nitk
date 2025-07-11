@@ -4,125 +4,100 @@ import cv2
 import json
 import time
 
-# -----------------------------
-# CONFIGURATION
-# -----------------------------
-ROWS, COLS = 4, 4
-FRAME_HEIGHT, FRAME_WIDTH = 480, 640
-CELL_H = FRAME_HEIGHT // ROWS
-CELL_W = FRAME_WIDTH // COLS
-PRINT_INTERVAL = 1.0  # seconds
-
-ZONES = {
-    "left": ['R1C1', 'R2C1', 'R3C1', 'R4C1'],
-    "right": ['R1C4', 'R2C4', 'R3C4', 'R4C4'],
-    "front": ['R1C2', 'R1C3', 'R2C2', 'R2C3', 'R3C2', 'R3C3', 'R4C2', 'R4C3']
-}
-
-# -----------------------------
-# SENSOR INPUT FUNCTIONS
-# -----------------------------
 def get_video():
     video, _ = freenect.sync_get_video()
-    return cv2.cvtColor(video, cv2.COLOR_RGB2BGR)
+    video = cv2.cvtColor(video, cv2.COLOR_RGB2BGR)
+    return video
 
 def get_depth():
     depth, _ = freenect.sync_get_depth(format=freenect.DEPTH_MM)
     return depth
 
-# -----------------------------
-# GRID ANALYSIS FUNCTION
-# -----------------------------
-def analyze_grid(depth):
+def analyze_depth(depth, rows=4, cols=4, frame_height=480, frame_width=640):
     grid_distances = {}
-    labels = {}
+    cell_h = frame_height // rows
+    cell_w = frame_width // cols
+    labeled_frame = np.zeros((frame_height, frame_width, 3), dtype=np.uint8)
 
-    for i in range(ROWS):
-        for j in range(COLS):
-            x1, y1 = j * CELL_W, i * CELL_H
-            x2, y2 = (j + 1) * CELL_W, (i + 1) * CELL_H
+    for i in range(rows):
+        for j in range(cols):
+            x1 = j * cell_w
+            y1 = i * cell_h
+            x2 = (j + 1) * cell_w
+            y2 = (i + 1) * cell_h
 
             region = depth[y1:y2, x1:x2]
             valid = region[region != 2047]
-
             key = f"R{i+1}C{j+1}"
 
             if valid.size > 0:
                 avg_distance = int(np.mean(valid))
-                label = f"{(avg_distance + 150)/1000:.2f}m" if avg_distance >= 150 else "<=0.15m"
+                if avg_distance < 150:
+                    label = "<=0.15m"
+                else:
+                    label = f"{(avg_distance + 150)/1000:.2f}m"
                 grid_distances[key] = avg_distance / 1000
             else:
                 label = "no data"
                 grid_distances[key] = None
 
-            labels[key] = (x1, y1, x2, y2, label)
+            cv2.rectangle(labeled_frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
+            cv2.putText(labeled_frame, label, (x1 + 5, y1 + 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
 
-    return grid_distances, labels
+    return grid_distances, labeled_frame
 
-# -----------------------------
-# DISPLAY FRAME FUNCTION
-# -----------------------------
-def draw_grid(frame, labels):
-    for key, (x1, y1, x2, y2, label) in labels.items():
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
-        cv2.putText(frame, label, (x1 + 5, y1 + 20),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-    return frame
-
-# -----------------------------
-# DECISION LOGIC
-# -----------------------------
-def control_logic(grid_distances):
+def decide_movement(grid_distances, zones):
     status = {
-        zone: any(grid_distances[pos] is not None and grid_distances[pos] < 1.0 for pos in positions)
-        for zone, positions in ZONES.items()
+        zone: any(grid_distances.get(pos) is not None and grid_distances[pos] < 1.0
+                  for pos in positions)
+        for zone, positions in zones.items()
     }
 
     if status["front"]:
-        print("🔴 STOP")
-        # send_pixhawk_cmd("stop")
-    elif status["left"]:
-        print("↪️ Move Right")
-        # send_pixhawk_cmd("right")
+        print("stop")
+    elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
+        print("stop")
     elif status["right"]:
-        print("↩️ Move Left")
-        # send_pixhawk_cmd("left")
+        print("move left")
+    elif status["left"]:
+        print("move right")
     else:
-        print("✅ CLEAR")
-        # send_pixhawk_cmd("forward")
+        print("move forward")
 
-# Placeholder for future Pixhawk integration
-def send_pixhawk_cmd(command):
-    print(f"[PIXHAWK] Execute: {command}")
-    # Implement MAVLink commands here using pymavlink
+rows, cols = 4, 4
+frame_height, frame_width = 480, 640
+last_print_time = 0
 
-# -----------------------------
-# MAIN LOOP
-# -----------------------------
-def main():
-    last_print_time = 0
+zones = {
+    "left": ['R1C1', 'R2C1', 'R3C1', 'R4C1'],
+    "right": ['R1C4', 'R2C4', 'R3C4', 'R4C4'],
+    "front": ['R1C2', 'R1C3', 'R2C2', 'R2C3', 'R3C2', 'R3C3', 'R4C2', 'R4C3']
+}
 
+try:
     while True:
-        frame = cv2.resize(get_video(), (FRAME_WIDTH, FRAME_HEIGHT))
-        depth = cv2.resize(get_depth(), (FRAME_WIDTH, FRAME_HEIGHT))
+        frame = get_video()
+        frame = cv2.resize(frame, (frame_width, frame_height))
+        depth = get_depth()
+        depth = cv2.resize(depth, (frame_width, frame_height))
 
-        grid_distances, labels = analyze_grid(depth)
-        frame = draw_grid(frame, labels)
-        cv2.imshow("Kinect Feed + Grid", frame)
+        grid_distances, labeled_frame = analyze_depth(depth, rows, cols, frame_height, frame_width)
 
         current_time = time.time()
-        if current_time - last_print_time >= PRINT_INTERVAL:
+        if current_time - last_print_time >= 1.0:
             print(json.dumps(grid_distances, indent=2))
-            control_logic(grid_distances)
             last_print_time = current_time
 
-        if cv2.waitKey(1) == 27:  # ESC key
+        decide_movement(grid_distances, zones)
+
+        combined_frame = cv2.addWeighted(frame, 0.6, labeled_frame, 0.4, 0)
+        cv2.imshow("Kinect RGB Feed + Depth Grid", combined_frame)
+
+        if cv2.waitKey(1) == 27:
             break
 
-    cv2.destroyAllWindows()
+except KeyboardInterrupt:
+    pass
 
-# -----------------------------
-# RUN
-# -----------------------------
-if __name__ == "__main__":
-    main()
+cv2.destroyAllWindows()
