@@ -4,6 +4,11 @@ import cv2
 import json
 import time
 import re
+import Jetson.GPIO as GPIO
+
+GPIO.setmode(GPIO.BOARD)
+IR_PIN=11
+GPIO.setup(IR_PIN, GPIO.IN)
 
 def get_video():
     video, _ = freenect.sync_get_video()
@@ -74,19 +79,25 @@ while True:
             for zone, positions in zones.items()
             }
     
-
-    if status["front"]:
-        print("stop")
-        #pixhawk CMDS
-    elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
-        print("stop")
-        # PIXHAWK COMMANDS GO HERE
-    elif (status["right"]):
-        print("move left")
-        #HERE AS WELL
-    elif (status["left"]):
-        print("move right")
-        #HERE AS WELL
+    if GPIO.input(IR_PIN)==0:
+        print("follwing black line..")
+        # pixhawk runs the motor 
+        if status["front"]:
+            print("object ahead!")
+            # pixhawk will instruct the motor to stop
+        elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
+            print("object ahead!")
+            # pixhawk will instruct the motor to stop
+        elif (status["right"]):
+            print("turn to left!")
+            # pixhawk will isntruct the motor to turn left
+        elif (status["left"]):
+            print("turn to right!")
+            # pixhawk will turn the motor to right
+    else:
+        print("finished the course")
+        #pixhawk will stop the motot
+        break
 
     if cv2.waitKey(1)==27:
         break
