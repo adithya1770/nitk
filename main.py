@@ -79,25 +79,53 @@ while True:
             for zone, positions in zones.items()
             }
     
-    if GPIO.input(IR_PIN)==0:
-        print("follwing black line..")
-        # pixhawk runs the motor 
+    if GPIO.input(IR_PIN) == 0:
+        print("following black line...")
+
         if status["front"]:
-            print("object ahead!")
-            # pixhawk will instruct the motor to stop
-        elif (status["front"] and status["right"]) or (status["front"] and status["left"]):
-            print("object ahead!")
-            # pixhawk will instruct the motor to stop
-        elif (status["right"]):
-            print("turn to left!")
-            # pixhawk will isntruct the motor to turn left
-        elif (status["left"]):
-            print("turn to right!")
-            # pixhawk will turn the motor to right
+            print("Obstacle ahead! Reversing...")
+            # reverse
+            print("REVERSE")  # Replace with Pixhawk logic
+            time.sleep(1.5)
+
+            print("Stopping...")
+            # stop
+            print("STOP")  # Replace with Pixhawk logic
+            time.sleep(0.5)
+
+            if not status["left"] and status["right"]:
+                print("Turning right to avoid obstacle on left")
+                # turn right
+                print("TURN RIGHT")  # Replace with Pixhawk logic
+                time.sleep(1.2)
+
+            elif not status["right"] and status["left"]:
+                print("Turning left to avoid obstacle on right")
+                # turn left
+                print("TURN LEFT")  # Replace with Pixhawk logic
+                time.sleep(1.2)
+
+            elif not status["left"] and not status["right"]:
+                print("Open both sides, defaulting to right turn")
+                # turn right
+                print("TURN RIGHT")  # Replace with Pixhawk logic
+                time.sleep(1.2)
+            else:
+                print("Trapped on all sides! STOP")
+                # stop
+                print("STOP")  # Replace with Pixhawk logic
+
+        else:
+            print("Path clear, following line")
+            # move forward
+            print("FORWARD")  # Replace with Pixhawk logic
+
     else:
-        print("finished the course")
-        #pixhawk will stop the motot
+        print("Finished the course.")
+        # stop
+        print("STOP")  # Replace with Pixhawk logic
         break
+
 
     if cv2.waitKey(1)==27:
         break
