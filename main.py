@@ -1,36 +1,52 @@
-import Jetson.GPIO as GPIO
+from machine import Pin, PWM
 import time
-import os
 
-# Use BCM pin numbering
-GPIO.setmode(GPIO.BOARD)  # or GPIO.BCM depending on preference
-IR_SENSOR_PIN = 8         # Physical pin 8 (BOARD mode)
+# IR Sensor connected to D4
+ir_sensor = Pin(14, Pin.IN)
 
-# Setup IR sensor input
-GPIO.setup(IR_SENSOR_PIN, GPIO.IN)
+# Servo on D13
+servo = PWM(Pin(12), freq=50)
 
-# ESP32 connection port
-ESP32_PORT = "/dev/ttyUSB0"
+# Helper function to set angle
+def set_angle(angle):
+    min_duty = 26   # ~0 deg
+    max_duty = 128  # ~180 deg
+    duty = int(min_duty + (angle / 180) * (max_duty - min_duty))
+    servo.duty(duty)
 
-def run_esp_script(script_name):
-    cmd = f"ampy --port {ESP32_PORT} run {script_name}"
-    print(f"[Jetson] Running: {cmd}")
-    os.system(cmd)
+# Sweep the servo left and right to find black line
+def sweep_and_search():
+    print("Searching for line...")
+    for angle in range(45, 135, 5):
+        set_angle(angle)
+        time.sleep(0.05)
+        if ir_sensor.value() == 0:
+            print("Black line found during sweep")
+            return angle
+    for angle in range(135, 45, -5):
+        set_angle(angle)
+        time.sleep(0.05)
+        if ir_sensor.value() == 0:
+            print("Black line found during reverse sweep")
+            return angle
+    print("No line found")
+    return None
 
-try:
-    while True:
-        sensor_val = GPIO.input(IR_SENSOR_PIN)
-
-        if sensor_val == GPIO.LOW:
-            print("[Jetson] Line detected!")
-            run_esp_script("forward.py")
+# Main loop
+while True:
+    if ir_sensor.value() == 0:
+        print("Line detected at center")
+        set_angle(90)  # Go straight
+    else:
+        result = sweep_and_search()
+        if result is not None:
+            if result < 90:
+                print("Turning Left")
+                set_angle(135)  # left
+            elif result > 90:
+                print("Turning Right")
+                set_angle(45)   # right
         else:
-            print("[Jetson] Line lost!")
-            run_esp_script("sweep_check.py")
-        
-        time.sleep(1)
-
-except KeyboardInterrupt:
-    print("\n[Jetson] Exiting...")
-finally:
-    GPIO.cleanup()
+            print("Still no line, stop")
+            set_angle(90)  # or optionally stop the servo
+    time.sleep(0.2)
